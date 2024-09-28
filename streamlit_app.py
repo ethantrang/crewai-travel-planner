@@ -1,134 +1,149 @@
 from crewai import Crew
-from trip_agents import TripAgents, StreamToExpander
-from trip_tasks import TripTasks
+from content_agents import ContentAgents, StreamToExpander
+from content_tasks import ContentTasks
 import streamlit as st
-import datetime
 import sys
 
-st.set_page_config(page_icon="✈️", layout="wide")
+st.set_page_config(
+    page_title=f"Content AI Agent",
+    page_icon="✍️",
+)
 
+st.markdown("""
+    <style>
+        [data-testid="stDecoration"] {
+            display: none;
+        }
+    </style>""",
+    unsafe_allow_html=True
+)
 
-def icon(emoji: str):
-    """Shows an emoji as a Notion-style page icon."""
-    st.write(
-        f'<span style="font-size: 78px; line-height: 1">{emoji}</span>',
-        unsafe_allow_html=True,
-    )
+if "master_draft" not in st.session_state:
+    st.session_state.master_draft = None
+if "result" not in st.session_state:
+    st.session_state.result = None
+if "agent_logs" not in st.session_state:
+    st.session_state.agent_logs = None
 
-
-class TripCrew:
-
-    def __init__(self, origin, cities, date_range, interests):
-        self.cities = cities
-        self.origin = origin
-        self.interests = interests
-        self.date_range = date_range
+class ContentCrew:
+    def __init__(self, master_draft):
+        self.master_draft = master_draft
         self.output_placeholder = st.empty()
 
     def run(self):
-        agents = TripAgents()
-        tasks = TripTasks()
+        agents = ContentAgents()
+        tasks = ContentTasks()
 
-        city_selector_agent = agents.city_selection_agent()
-        local_expert_agent = agents.local_expert()
-        travel_concierge_agent = agents.travel_concierge()
+        content_strategist = agents.content_strategist()
+        content_writer = agents.content_writer()
+        content_scripter = agents.content_scripter()
 
-        identify_task = tasks.identify_task(
-            city_selector_agent,
-            self.origin,
-            self.cities,
-            self.interests,
-            self.date_range
-        )
+        # First Crew: Content Strategist Tasks
+        capture_voice_task = tasks.capture_voice(content_strategist, self.master_draft)
+        key_message_and_value_task = tasks.key_message_and_value(content_strategist, self.master_draft)
+        submessages_and_topics_task = tasks.submessages_and_topics(content_strategist, self.master_draft)
 
-        gather_task = tasks.gather_task(
-            local_expert_agent,
-            self.origin,
-            self.interests,
-            self.date_range
-        )
-
-        plan_task = tasks.plan_task(
-            travel_concierge_agent,
-            self.origin,
-            self.interests,
-            self.date_range
-        )
-
-        crew = Crew(
-            agents=[
-                city_selector_agent, local_expert_agent, travel_concierge_agent
-            ],
-            tasks=[identify_task, gather_task, plan_task],
+        strategist_crew = Crew(
+            agents=[content_strategist],
+            tasks=[capture_voice_task, key_message_and_value_task, submessages_and_topics_task],
             verbose=True
         )
 
-        result = crew.kickoff()
-        self.output_placeholder.markdown(result)
+        strategist_result = strategist_crew.kickoff()
 
-        return result
+        # Extract outputs from the strategist tasks
+        voice = capture_voice_task.output.raw
+        key_message_and_value = key_message_and_value_task.output.raw
+        submessages_and_topics = submessages_and_topics_task.output.raw
 
+        # Second Crew: Writing Tasks
+        short_form_content_task = tasks.short_form_content(content_writer, voice, key_message_and_value, submessages_and_topics)
+        long_form_written_content_task = tasks.long_form_written_content(content_writer, voice, key_message_and_value, submessages_and_topics)
 
-if __name__ == "__main__":
-    icon("🏖️ VacAIgent")
-
-    st.subheader("Let AI agents plan your next vacation!",
-                 divider="rainbow", anchor=False)
-
-    import datetime
-
-    today = datetime.datetime.now().date()
-    next_year = today.year + 1
-    jan_16_next_year = datetime.date(next_year, 1, 10)
-
-    with st.sidebar:
-        st.header("👇 Enter your trip details")
-        with st.form("my_form"):
-            location = st.text_input(
-                "Where are you currently located?", placeholder="San Mateo, CA")
-            cities = st.text_input(
-                "City and country are you interested in vacationing at?", placeholder="Bali, Indonesia")
-            date_range = st.date_input(
-                "Date range you are interested in traveling?",
-                min_value=today,
-                value=(today, jan_16_next_year + datetime.timedelta(days=6)),
-                format="MM/DD/YYYY",
-            )
-            interests = st.text_area("High level interests and hobbies or extra details about your trip?",
-                                     placeholder="2 adults who love swimming, dancing, hiking, and eating")
-
-            submitted = st.form_submit_button("Submit")
-
-        st.divider()
-
-        # Credits to joaomdmoura/CrewAI for the code: https://github.com/joaomdmoura/crewAI
-        st.sidebar.markdown(
-        """
-        Credits to [**@joaomdmoura**](https://twitter.com/joaomdmoura)
-        for creating **crewAI** 🚀
-        """,
-            unsafe_allow_html=True
+        writer_crew = Crew(
+            agents=[content_writer],
+            tasks=[short_form_content_task, long_form_written_content_task],
+            verbose=True
         )
 
-        st.sidebar.info("Click the logo to visit GitHub repo", icon="👇")
-        st.sidebar.markdown(
-            """
-        <a href="https://github.com/joaomdmoura/crewAI" target="_blank">
-            <img src="https://raw.githubusercontent.com/joaomdmoura/crewAI/main/docs/crewai_logo.png" alt="CrewAI Logo" style="width:100px;"/>
-        </a>
-        """,
-            unsafe_allow_html=True
+        writer_result = writer_crew.kickoff()
+
+        # Third Crew: Video Scripting Tasks
+        short_form_video_script_task = tasks.short_form_video_script(content_scripter, voice, key_message_and_value, submessages_and_topics)
+        long_form_video_script_task = tasks.long_form_video_script(content_scripter, voice, key_message_and_value, submessages_and_topics)
+
+        scripter_crew = Crew(
+            agents=[content_scripter],
+            tasks=[short_form_video_script_task, long_form_video_script_task],
+            verbose=True
         )
 
+        scripter_result = scripter_crew.kickoff()
 
-if submitted:
-    with st.status("🤖 **Agents at work...**", state="running", expanded=True) as status:
-        with st.container(height=500, border=False):
-            sys.stdout = StreamToExpander(st)
-            trip_crew = TripCrew(location, cities, date_range, interests)
-            result = trip_crew.run()
-        status.update(label="✅ Trip Plan Ready!",
-                      state="complete", expanded=False)
+        final_result = {
+            "content_strategy": {
+                "voice": capture_voice_task.output.raw,
+                "key_message_and_value": key_message_and_value_task.output.raw,
+                "submessages_and_topics": submessages_and_topics_task.output.raw
+            },
+            "written_content": {
+                "short_form": short_form_content_task.output.raw,
+                "long_form": long_form_written_content_task.output.raw
+            },
+            "video_scripts": {
+                "short_form": short_form_video_script_task.output.raw,
+                "long_form": long_form_video_script_task.output.raw
+            }
+        }
 
-    st.subheader("Here is your Trip Plan", anchor=False, divider="rainbow")
-    st.markdown(result)
+        self.output_placeholder.markdown(final_result)
+        
+
+        return final_result
+
+with st.container(border=True):
+
+    st.title("✍️ Content AI Agent")
+    st.write("Let a dynamic team of agents strategize, write, and script your content. Built with crewAI.")
+    st.text("")
+
+st.write("**Agent inputs**")
+with st.form("content_form"):
+    master_draft = st.text_area(
+        "**Master draft**",
+        placeholder="Paste your draft here...",
+        height=150
+    )
+    submitted = st.form_submit_button("▶️ Run Agent", use_container_width=True)
+
+if submitted or st.session_state["agent_logs"]:
+    if submitted:
+        st.write("**Agent logs**")
+        with st.status("🤖 **Running task...**", state="running", expanded=True) as status:
+            log_output = StreamToExpander(st)
+            sys.stdout = log_output
+            content_crew = ContentCrew(master_draft)
+            st.session_state["result"] = content_crew.run()
+            status.update(label="Agent tasks complete", state="complete", expanded=False)
+        
+        # Store logs in session state
+        st.session_state["agent_logs"] = log_output.getvalue()
+    else:
+        with st.container(border=True):
+            with st.expander("**Logs**"):
+                st.write(st.session_state["agent_logs"])
+
+if st.session_state["result"]:
+    st.write("**Agent outputs**")
+    with st.container(border=True):
+        
+        with st.expander("🕵️ **Content Strategist** _returned an update_"):
+            st.write("**Voice**\n" + st.session_state["result"]["content_strategy"]["voice"])
+            st.write("**Key Message and Value**\n" + st.session_state["result"]["content_strategy"]["key_message_and_value"])
+            st.write("**Submessages and Topics**\n" + st.session_state["result"]["content_strategy"]["submessages_and_topics"])
+        with st.expander("👨‍🎨 **Content Writer** _returned an update_"):
+            st.write("**Short Form Content**\n" + st.session_state["result"]["written_content"]["short_form"])
+            st.write("**Long Form Content**\n" + st.session_state["result"]["written_content"]["long_form"])
+        with st.expander("👨‍💻 **Content Scripter** _returned an update_"):
+            st.write("**Short Form Video Script**\n" + st.session_state["result"]["video_scripts"]["short_form"])
+            st.write("**Long Form Video Script**\n" + st.session_state["result"]["video_scripts"]["long_form"])
